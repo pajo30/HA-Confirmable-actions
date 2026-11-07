@@ -13,14 +13,17 @@ blueprint:
       description: When to request confirmation.
       selector:
         trigger: {}
-    notification_service:
-      name: Mobile notification action
+    notification_device:
+      name: Notification device
       description: >-
-        Enter the Companion app notification action from Developer Tools >
-        Actions, for example notify.mobile_app_my_phone. Use a single device,
-        not a notification group.
+        Select the Companion app device that should receive the notification.
+        The device must be registered with Home Assistant and able to receive
+        push notifications.
       selector:
-        text: {}
+        device:
+          filter:
+            - integration: mobile_app
+          multiple: false
     notification_title:
       name: Notification title
       default: Confirmation requested
@@ -79,7 +82,6 @@ max: 10
 
 actions:
   - variables:
-      notification_service: !input notification_service
       notification_tag: "{{ 'confirmable_' ~ context.id }}"
   - repeat:
       sequence:
@@ -87,19 +89,20 @@ actions:
             yes_action: "{{ 'YES_' ~ context.id ~ '_' ~ repeat.index }}"
             no_action: "{{ 'NO_' ~ context.id ~ '_' ~ repeat.index }}"
             remind_action: "{{ 'REMIND_' ~ context.id ~ '_' ~ repeat.index }}"
-        - action: "{{ notification_service }}"
+        - device_id: !input notification_device
+          domain: mobile_app
+          type: notify
+          title: !input notification_title
+          message: !input notification_message
           data:
-            title: !input notification_title
-            message: !input notification_message
-            data:
-              tag: "{{ notification_tag }}"
-              actions:
-                - action: "{{ yes_action }}"
-                  title: !input accept_label
-                - action: "{{ no_action }}"
-                  title: !input deny_label
-                - action: "{{ remind_action }}"
-                  title: !input reminder_label
+            tag: "{{ notification_tag }}"
+            actions:
+              - action: "{{ yes_action }}"
+                title: !input accept_label
+              - action: "{{ no_action }}"
+                title: !input deny_label
+              - action: "{{ remind_action }}"
+                title: !input reminder_label
         - wait_for_trigger:
             - trigger: event
               id: "yes"
@@ -118,12 +121,13 @@ actions:
                 action: "{{ remind_action }}"
           timeout: !input response_timeout
           continue_on_timeout: true
-        - action: "{{ notification_service }}"
+        - device_id: !input notification_device
+          domain: mobile_app
+          type: notify
           continue_on_error: true
+          message: clear_notification
           data:
-            message: clear_notification
-            data:
-              tag: "{{ notification_tag }}"
+            tag: "{{ notification_tag }}"
         - if: "{{ wait.completed and wait.trigger.id == 'remind' }}"
           then:
             - delay: !input reminder_delay
