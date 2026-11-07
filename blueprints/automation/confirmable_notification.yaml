@@ -1,0 +1,133 @@
+blueprint:
+  name: Confirmable notification with reminders
+  description: >-
+    Send a Companion app notification with Yes, No, and Remind me later
+    buttons. Run the configured actions only on Yes, stop on No or timeout,
+    or resend the notification after the reminder delay.
+  domain: automation
+  homeassistant:
+    min_version: "2024.10.0"
+  input:
+    notification_trigger:
+      name: Notification trigger
+      description: When to request confirmation.
+      selector:
+        trigger: {}
+    notification_service:
+      name: Mobile notification action
+      description: >-
+        Enter the Companion app notification action from Developer Tools >
+        Actions, for example notify.mobile_app_my_phone. Use a single device,
+        not a notification group.
+      selector:
+        text: {}
+    notification_title:
+      name: Notification title
+      default: Confirmation requested
+      selector:
+        text: {}
+    notification_message:
+      name: Notification message
+      description: The question the recipient should answer.
+      selector:
+        text:
+          multiline: true
+    accept_label:
+      name: Accept button label
+      description: Text for the button that runs the confirmation actions.
+      default: "Yes"
+      selector:
+        text: {}
+    deny_label:
+      name: Deny button label
+      description: Text for the button that finishes without running actions.
+      default: "No"
+      selector:
+        text: {}
+    reminder_label:
+      name: Reminder button label
+      description: Text for the button that requests another notification later.
+      default: Remind me later
+      selector:
+        text: {}
+    confirmation_actions:
+      name: Actions on Yes
+      description: These actions run only when the recipient answers Yes.
+      selector:
+        action: {}
+    reminder_delay:
+      name: Reminder delay
+      description: How long to wait after Remind me later before sending again.
+      default:
+        minutes: 15
+      selector:
+        duration: {}
+    response_timeout:
+      name: Response timeout
+      description: >-
+        How long to wait for a response to each notification. On timeout,
+        stop without running the confirmation actions.
+      default:
+        hours: 24
+      selector:
+        duration: {}
+
+triggers: !input notification_trigger
+
+mode: parallel
+max: 10
+
+actions:
+  - variables:
+      notification_service: !input notification_service
+      notification_tag: "{{ 'confirmable_' ~ context.id }}"
+  - repeat:
+      sequence:
+        - variables:
+            yes_action: "{{ 'YES_' ~ context.id ~ '_' ~ repeat.index }}"
+            no_action: "{{ 'NO_' ~ context.id ~ '_' ~ repeat.index }}"
+            remind_action: "{{ 'REMIND_' ~ context.id ~ '_' ~ repeat.index }}"
+        - action: "{{ notification_service }}"
+          data:
+            title: !input notification_title
+            message: !input notification_message
+            data:
+              tag: "{{ notification_tag }}"
+              actions:
+                - action: "{{ yes_action }}"
+                  title: !input accept_label
+                - action: "{{ no_action }}"
+                  title: !input deny_label
+                - action: "{{ remind_action }}"
+                  title: !input reminder_label
+        - wait_for_trigger:
+            - trigger: event
+              id: "yes"
+              event_type: mobile_app_notification_action
+              event_data:
+                action: "{{ yes_action }}"
+            - trigger: event
+              id: "no"
+              event_type: mobile_app_notification_action
+              event_data:
+                action: "{{ no_action }}"
+            - trigger: event
+              id: "remind"
+              event_type: mobile_app_notification_action
+              event_data:
+                action: "{{ remind_action }}"
+          timeout: !input response_timeout
+          continue_on_timeout: true
+        - action: "{{ notification_service }}"
+          continue_on_error: true
+          data:
+            message: clear_notification
+            data:
+              tag: "{{ notification_tag }}"
+        - if: "{{ wait.completed and wait.trigger.id == 'remind' }}"
+          then:
+            - delay: !input reminder_delay
+      until: "{{ not wait.completed or wait.trigger.id != 'remind' }}"
+  - if: "{{ wait.completed and wait.trigger.id == 'yes' }}"
+    then:
+      - sequence: !input confirmation_actions
