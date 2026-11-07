@@ -34,7 +34,7 @@ and reload automations.
 
 ## Configuration
 
-Choose a trigger, the recipient's notification action, a title and message,
+Choose a trigger, the recipient's **Notification device**, a title and message,
 and the actions to run on **Yes**. Set the reminder delay (default: 15 minutes)
 and the response timeout for each notification (default: 24 hours).
 
@@ -43,9 +43,15 @@ Optionally customize the **Accept button label**, **Deny button label**, and
 **Remind me later**. Changing these labels only changes the displayed text,
 not the response behavior.
 
-Find the exact notification action in **Developer Tools → Actions**, for example
-`notify.mobile_app_my_phone`. Use a single Companion app device rather than a
-notification group. A device ID or display name is not a notification action.
+The **Notification device** picker lists devices registered through the
+Companion app (`mobile_app` integration). Select exactly one device; both the
+notification and its subsequent clearing are sent to that device. Notification
+groups are not supported.
+
+If upgrading from the notification-action text field, edit each existing
+automation and select its **Notification device** again. For YAML automations,
+replace `notification_service` with `notification_device`, using the device's
+registry ID rather than a `notify.mobile_app_*` action or display name.
 
 For example, ask whether to turn off a light every evening:
 
@@ -57,7 +63,7 @@ use_blueprint:
     notification_trigger:
       - trigger: time
         at: "22:00:00"
-    notification_service: notify.mobile_app_my_phone
+    notification_device: your_mobile_app_device_id
     notification_title: Living room
     notification_message: Turn off the living room light?
     accept_label: Turn it off
@@ -75,7 +81,7 @@ use_blueprint:
 
 The example path matches the manual installation above. If you imported through
 the UI, create the automation through the UI to use its assigned blueprint path.
-Replace the notification action and entity with your own.
+Replace the device ID and entity with your own.
 
 ## Behavior and limitations
 
