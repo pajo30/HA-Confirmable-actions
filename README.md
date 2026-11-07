@@ -38,6 +38,11 @@ Choose a trigger, the recipient's notification action, a title and message,
 and the actions to run on **Yes**. Set the reminder delay (default: 15 minutes)
 and the response timeout for each notification (default: 24 hours).
 
+Optionally customize the **Accept button label**, **Deny button label**, and
+**Reminder button label**. Their defaults are **Yes**, **No**, and
+**Remind me later**. Changing these labels only changes the displayed text,
+not the response behavior.
+
 Find the exact notification action in **Developer Tools → Actions**, for example
 `notify.mobile_app_my_phone`. Use a single Companion app device rather than a
 notification group. A device ID or display name is not a notification action.
@@ -55,6 +60,9 @@ use_blueprint:
     notification_service: notify.mobile_app_my_phone
     notification_title: Living room
     notification_message: Turn off the living room light?
+    accept_label: Turn it off
+    deny_label: Leave it on
+    reminder_label: Ask me later
     confirmation_actions:
       - action: light.turn_off
         target:
