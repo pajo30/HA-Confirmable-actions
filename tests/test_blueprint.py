@@ -21,7 +21,7 @@ from homeassistant.helpers.script import Script, async_validate_actions_config
 from homeassistant.loader import async_setup
 from homeassistant.util.yaml import load_yaml
 
-from custom_components.confirmable_actions import async_setup as setup_group_action
+from custom_components.confirmable_actions import async_setup_entry as setup_group_action
 
 
 BLUEPRINT_PATH = (
