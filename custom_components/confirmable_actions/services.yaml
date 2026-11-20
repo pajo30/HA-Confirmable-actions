@@ -1,0 +1,21 @@
+send_notification:
+  name: Send actionable notification to group
+  description: Send a Companion app notification to every member of a notification group helper.
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          filter:
+            - domain: notify
+              integration: group
+    message:
+      required: true
+      selector:
+        text:
+    title:
+      selector:
+        text:
+    data:
+      selector:
+        object:

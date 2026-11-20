@@ -35,6 +35,18 @@ blueprint:
       default: ""
       selector:
         text: {}
+    notification_group_helper:
+      name: Notification group helper
+      description: >-
+        Optional notification group helper. Requires the Confirmable Actions
+        custom integration. All members must be Companion app notify entities.
+        Takes precedence over Notification group and Notification device.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: notify
+              integration: group
     notification_title:
       name: Notification title
       description: Supports templates, evaluated on every send.
@@ -126,6 +138,7 @@ actions:
   - variables:
       notification_tag: "{{ 'confirmable_' ~ context.id }}"
       notification_group: !input notification_group
+      notification_group_helper: !input notification_group_helper
       accept_label: !input accept_label
       deny_label: !input deny_label
       reminder_label: !input reminder_label
@@ -154,20 +167,29 @@ actions:
                 {% endif %}
               {% endfor %}
               {{ {'tag': notification_tag, 'actions': buttons.items} }}
-        - if: "{{ notification_group != '' }}"
+        - if: "{{ notification_group_helper != '' }}"
           then:
-            - action: "{{ notification_group }}"
+            - action: confirmable_actions.send_notification
               data:
+                entity_id: !input notification_group_helper
                 title: !input notification_title
                 message: !input notification_message
                 data: "{{ notification_data }}"
           else:
-            - device_id: !input notification_device
-              domain: mobile_app
-              type: notify
-              title: !input notification_title
-              message: !input notification_message
-              data: "{{ notification_data }}"
+            - if: "{{ notification_group != '' }}"
+              then:
+                - action: "{{ notification_group }}"
+                  data:
+                    title: !input notification_title
+                    message: !input notification_message
+                    data: "{{ notification_data }}"
+              else:
+                - device_id: !input notification_device
+                  domain: mobile_app
+                  type: notify
+                  title: !input notification_title
+                  message: !input notification_message
+                  data: "{{ notification_data }}"
         - wait_for_trigger:
             - trigger: event
               id: "yes"
@@ -196,22 +218,32 @@ actions:
                 action: "{{ extra_2_action }}"
           timeout: !input response_timeout
           continue_on_timeout: true
-        - if: "{{ notification_group != '' }}"
+        - if: "{{ notification_group_helper != '' }}"
           then:
-            - action: "{{ notification_group }}"
+            - action: confirmable_actions.send_notification
               continue_on_error: true
               data:
+                entity_id: !input notification_group_helper
                 message: clear_notification
                 data:
                   tag: "{{ notification_tag }}"
           else:
-            - device_id: !input notification_device
-              domain: mobile_app
-              type: notify
-              continue_on_error: true
-              message: clear_notification
-              data:
-                tag: "{{ notification_tag }}"
+            - if: "{{ notification_group != '' }}"
+              then:
+                - action: "{{ notification_group }}"
+                  continue_on_error: true
+                  data:
+                    message: clear_notification
+                    data:
+                      tag: "{{ notification_tag }}"
+              else:
+                - device_id: !input notification_device
+                  domain: mobile_app
+                  type: notify
+                  continue_on_error: true
+                  message: clear_notification
+                  data:
+                    tag: "{{ notification_tag }}"
         - if: "{{ wait.trigger is not none and wait.trigger.id == 'remind' }}"
           then:
             - delay: !input reminder_delay
