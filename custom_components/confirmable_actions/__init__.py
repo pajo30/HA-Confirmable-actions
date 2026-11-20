@@ -1,6 +1,7 @@
 """Send actionable notifications to notification group helper members."""
 
 import asyncio
+from pathlib import Path
 
 import voluptuous as vol
 
@@ -9,11 +10,13 @@ from homeassistant.components.mobile_app.util import (
     get_notify_service,
     webhook_id_from_device_id,
 )
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv, entity_registry as er
 
 DOMAIN = "confirmable_actions"
+BLUEPRINT_NAME = "confirmable_notification.yaml"
 
 SEND_SCHEMA = vol.Schema(
     {
@@ -25,8 +28,36 @@ SEND_SCHEMA = vol.Schema(
 )
 
 
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Register the group notification action."""
+def _install_blueprint(config_dir: str) -> bool:
+    """Install the bundled blueprint without replacing an existing file."""
+    source = Path(__file__).parent / "blueprints" / BLUEPRINT_NAME
+    content = source.read_bytes()
+    destination = (
+        Path(config_dir) / "blueprints" / "automation" / DOMAIN / BLUEPRINT_NAME
+    )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        target = destination.open("xb")
+    except FileExistsError:
+        return False
+    try:
+        with target:
+            target.write(content)
+    except OSError:
+        destination.unlink()
+        raise
+    return True
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Install the blueprint and register the group notification action."""
+    installed = await hass.async_add_executor_job(
+        _install_blueprint, hass.config.config_dir
+    )
+    if installed:
+        blueprints = hass.data.get("blueprint", {}).get("automation")
+        if blueprints is not None:
+            await blueprints.async_reset_cache()
 
     async def send_notification(call: ServiceCall) -> None:
         registry = er.async_get(hass)
@@ -94,4 +125,10 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.services.async_register(
         DOMAIN, "send_notification", send_notification, schema=SEND_SCHEMA
     )
+    return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Remove the action when the integration is unloaded."""
+    hass.services.async_remove(DOMAIN, "send_notification")
     return True

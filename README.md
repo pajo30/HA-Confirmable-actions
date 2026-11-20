@@ -37,37 +37,21 @@ In Home Assistant Marketplace (or HACS):
 2. Add `https://github.com/pajo30/HA-Confirmable-actions` as an
    **Integration** repository.
 3. Find **Confirmable Actions** and download it. 🎉
-4. Add the following to `configuration.yaml`, then restart Home Assistant:
-
-   ```yaml
-   confirmable_actions:
-   ```
+4. Restart Home Assistant.
+5. Go to **Settings → Devices & services → Add integration**, search for
+   **Confirmable Actions**, and complete setup.
 
 Alternatively, copy `custom_components/confirmable_actions` from this
-repository to `<config>/custom_components/confirmable_actions`, then add the
-configuration above and restart.
+repository to `<config>/custom_components/confirmable_actions`, restart, and
+add the integration through **Devices & services**.
 
-The integration registers `confirmable_actions.send_notification`; it is
-configured through YAML, not the **Add integration** dialog. Installing it
-does not install the blueprint, so import that separately below.
+Setup registers `confirmable_actions.send_notification` and installs the
+blueprint automatically. No `configuration.yaml` edit is required.
 
-### 2️⃣ Import the blueprint
+### 2️⃣ Create a confirmation automation
 
-1. Open **Settings → Automations & scenes → Blueprints → Import Blueprint**.
-2. Paste this URL:
-
-   ```text
-   https://github.com/pajo30/HA-Confirmable-actions/blob/main/blueprints/automation/confirmable_notification.yaml
-   ```
-
-3. Preview and import, then select **Create automation**. ✨
-
-Alternatively, copy
-`blueprints/automation/confirmable_notification.yaml` from this repository to
-`<config>/blueprints/automation/confirmable_actions/confirmable_notification.yaml`
-and reload automations.
-
-### 3️⃣ Create a confirmation automation
+Open **Settings → Automations & scenes → Blueprints**, find **Confirmable
+notification with reminders**, and select **Create automation**. ✨
 
 Create a notification group under **Settings → Devices & services → Helpers**,
 containing Companion app notification entities. In the blueprint, choose it under
@@ -80,6 +64,13 @@ actions, preserving the buttons that Home Assistant's standard
 `notify.send_message` action does not forward. Nested notification group
 helpers are supported. If a member cannot be resolved, the request fails
 rather than sending an incomplete notification.
+
+The installed blueprint is never overwritten, including on integration updates.
+To update it, back up any edits, remove
+`<config>/blueprints/automation/confirmable_actions/confirmable_notification.yaml`,
+then restart Home Assistant. The integration reinstalls its bundled version at
+the same path. Existing automations keep using that path; if any fail to load
+on restart, reload automations after the integration has started.
 
 ## ⚙️ Configuration
 
@@ -114,6 +105,17 @@ is not required. You can also use a YAML notification action group instead of a
 helper. Leave **Notification group helper** empty and enter an action such as
 `notify.family` under **Notification group**. Group members must support
 Companion app actionable notifications.
+
+To import it, open **Settings → Automations & scenes → Blueprints → Import
+Blueprint** and paste:
+
+```text
+https://github.com/pajo30/HA-Confirmable-actions/blob/main/blueprints/automation/confirmable_notification.yaml
+```
+
+Alternatively, copy `blueprints/automation/confirmable_notification.yaml` to
+`<config>/blueprints/automation/confirmable_actions/confirmable_notification.yaml`
+and reload automations.
 
 ### 📨 YAML notification action groups
 
@@ -177,9 +179,10 @@ use_blueprint:
       hours: 24
 ```
 
-The example path matches the manual installation above. If you imported through
-the UI, create the automation through the UI to use its assigned blueprint path.
-Replace the device ID and entity with your own.
+The example path matches the integration's automatic installation and the
+manual copy above. If you imported through the UI, create the automation
+through the UI to use its assigned blueprint path. Replace the device ID and
+entity with your own.
 
 ## 🧠 Behavior and limitations
 
@@ -222,3 +225,7 @@ python -m unittest discover -s tests -q
 
 The `josepy` constraint keeps the older Home Assistant runtime compatible with
 its ACME dependency.
+
+The blueprint is also bundled under
+`custom_components/confirmable_actions/blueprints/` for integration installs.
+Keep both copies identical when making changes.
