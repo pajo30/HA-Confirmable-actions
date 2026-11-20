@@ -65,6 +65,29 @@ The first response received from any member applies to the entire request;
 the notification is then cleared on all members. A reminder resends to all
 members, not just the device that requested it.
 
+### Notification group helpers
+
+To select a notification group created under **Settings → Devices & services
+→ Helpers**, install the companion custom integration:
+
+1. Copy `custom_components/confirmable_actions` from this repository to
+   `<config>/custom_components/confirmable_actions`.
+2. Add `confirmable_actions:` to `configuration.yaml` and restart Home Assistant.
+3. Update the blueprint, then choose your helper under **Notification group
+   helper**. Still select a group member under **Notification device**.
+
+Helper support requires Home Assistant **2026.5 or newer**, when Companion
+app notification entities became available. The helper must contain only
+Companion app notification entities (nested
+notification group helpers are also supported). The helper takes precedence
+over the notification group action and device. Home Assistant's standard
+`notify.send_message` action does not forward the button data, so the custom
+integration resolves each member to its mobile app notification action instead.
+If a member cannot be resolved, the request fails rather than sending an
+incomplete notification.
+
+### YAML notification action groups
+
 For example, configure a notification group in Home Assistant's
 `configuration.yaml` (merge this with any existing `notify` configuration),
 then restart Home Assistant:
@@ -149,6 +172,8 @@ Replace the device ID and entity with your own.
 - The device must be able to communicate its response to Home Assistant.
   This blueprint is a convenience confirmation, not an authorization mechanism
   for safety-critical actions.
+- Response listening starts after the send action completes. A response made
+  while the group send is still in progress can be missed.
 
 See the [Companion app actionable notification documentation](https://companion.home-assistant.io/docs/notifications/actionable-notifications/)
 for supported devices and notification behavior.
@@ -159,7 +184,10 @@ The tests use Home Assistant's blueprint validation and script runner. In a
 Python 3.12 virtual environment, install the runtime and mobile app dependency:
 
 ```sh
-pip install 'homeassistant==2024.10.0' 'PyNaCl==1.5.0' 'josepy<2'
+pip install 'homeassistant==2024.10.0' 'PyNaCl==1.5.0' 'josepy<2' \
+  'hass-nabucasa==0.81.1' 'hassil==1.7.4' 'home-assistant-intents==2024.10.2' \
+  'numpy==1.26.4' 'PyTurboJPEG==1.7.5' 'ha-av==10.1.1' 'mutagen==1.47.0' \
+  'ha-ffmpeg==3.2.0' 'pymicro-vad==1.0.1' 'pyspeex-noise==1.0.2'
 python -m unittest discover -s tests -q
 ```
 

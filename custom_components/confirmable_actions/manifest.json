@@ -1,0 +1,8 @@
+{
+  "domain": "confirmable_actions",
+  "name": "Confirmable Actions",
+  "version": "1.0.0",
+  "documentation": "https://github.com/pajo30/HA-Confirmable-actions",
+  "dependencies": ["group", "mobile_app"],
+  "codeowners": []
+}
