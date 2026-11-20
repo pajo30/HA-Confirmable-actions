@@ -1,26 +1,57 @@
-# HA-Confirmable-actions
+# Confirmable Actions
 
-A Home Assistant automation blueprint for asking before running an action.
-One device or a notification group receives a mobile notification with three
-default buttons:
+**Let your household decide before an automation acts.** Ask a question on
+your phones, run an action when someone confirms, or ask again later.
 
-- **Yes** — run your configured actions.
-- **No** — finish without running any actions.
-- **Remind me later** — wait for the configured delay, then send the same
-  question again. Reminders can repeat until the recipient answers or a
-  notification times out.
+The blueprint and companion integration work together: the blueprint handles
+the question, response, and actions, while the integration delivers actionable
+notifications to members of a Home Assistant notification group helper.
+Create and manage the group in the UI instead of maintaining a YAML notification
+group, and let the first person to respond decide for the whole group.
 
-Titles and messages support templates for conditional content. Two optional
-extra buttons can each run a separate Home Assistant action sequence.
+- **Confirm, decline, or remind:** run your actions on **Yes**, stop on **No**,
+  or repeat the question after **Remind me later**.
+- **Include your household:** send to a notification group helper, including
+  nested groups; responses and clearing apply to the whole request.
+- **Make it yours:** use templated titles and messages, custom button labels,
+  and up to two extra buttons with their own action sequences.
+
+Example: at bedtime, ask the household whether to turn off the living room
+lights. Anyone in the group can confirm, decline, or ask to be reminded.
 
 ## Requirements
 
-- Home Assistant **2024.10.0 or newer**.
+- Home Assistant **2026.5 or newer** for the integration and notification
+  group helpers. The blueprint alone requires **2024.10.0 or newer**.
 - The Home Assistant Companion app for Android or iOS, registered with your
   Home Assistant instance and allowed to receive notifications.
 - A working `notify.mobile_app_*` action for each recipient's device.
 
-## Installation
+## Get started
+
+### 1. Install the integration
+
+In Home Assistant Marketplace (or HACS):
+
+1. Open the menu and choose **Custom repositories**.
+2. Add `https://github.com/pajo30/HA-Confirmable-actions` as an
+   **Integration** repository.
+3. Find **Confirmable Actions** and download it.
+4. Add the following to `configuration.yaml`, then restart Home Assistant:
+
+   ```yaml
+   confirmable_actions:
+   ```
+
+Alternatively, copy `custom_components/confirmable_actions` from this
+repository to `<config>/custom_components/confirmable_actions`, then add the
+configuration above and restart.
+
+The integration registers `confirmable_actions.send_notification`; it is
+configured through YAML, not the **Add integration** dialog. Installing it
+does not install the blueprint, so import that separately below.
+
+### 2. Import the blueprint
 
 1. Open **Settings → Automations & scenes → Blueprints → Import Blueprint**.
 2. Paste this URL:
@@ -36,11 +67,24 @@ Alternatively, copy
 `<config>/blueprints/automation/confirmable_actions/confirmable_notification.yaml`
 and reload automations.
 
+### 3. Create a confirmation automation
+
+Create a notification group under **Settings → Devices & services → Helpers**,
+containing Companion app notification entities. In the blueprint, choose it under
+**Notification group helper** and select one of its members under **Notification
+device**. Choose a trigger, enter your question, and add the actions to run on
+**Yes**.
+
+The integration resolves the helper's members to their mobile app notification
+actions, preserving the buttons that Home Assistant's standard
+`notify.send_message` action does not forward. Nested notification group
+helpers are supported. If a member cannot be resolved, the request fails
+rather than sending an incomplete notification.
+
 ## Configuration
 
-Choose a trigger, the recipient's **Notification device**, a title and message,
-and the actions to run on **Yes**. Set the reminder delay (default: 15 minutes)
-and the response timeout for each notification (default: 24 hours).
+Set the reminder delay (default: 15 minutes) and the response timeout for each
+notification (default: 24 hours).
 
 Optionally customize the **Accept button label**, **Deny button label**, and
 **Reminder button label**. Their defaults are **Yes**, **No**, and
@@ -55,36 +99,21 @@ three notification buttons: hide **No** and/or **Remind me later** when adding
 extra buttons to stay within that limit. iOS supports up to ten.
 
 The **Notification device** picker lists devices registered through the
-Companion app (`mobile_app` integration). Select one device, and optionally enter
-a **Notification group** action such as `notify.family`. When a group is supplied,
-it takes precedence over the device picker. Still select a valid group member
-in the device picker: Home Assistant validates device actions even in unused
-branches. Both sending and clearing use the same destination. A group must contain only
-Companion app notification services that support actionable notifications.
-The first response received from any member applies to the entire request;
-the notification is then cleared on all members. A reminder resends to all
-members, not just the device that requested it.
+Companion app (`mobile_app` integration). Even when using a group, select a
+valid group member: Home Assistant validates device actions in unused branches.
+The helper takes precedence over a **Notification group** action, which in turn
+takes precedence over the device. Sending and clearing use the same destination.
+The first response from any member applies to the entire request; the
+notification is then cleared on all members. A reminder resends to all members,
+not just the device that requested it.
 
-### Notification group helpers
+### Blueprint without the integration
 
-To select a notification group created under **Settings → Devices & services
-→ Helpers**, install the companion custom integration:
-
-1. Copy `custom_components/confirmable_actions` from this repository to
-   `<config>/custom_components/confirmable_actions`.
-2. Add `confirmable_actions:` to `configuration.yaml` and restart Home Assistant.
-3. Update the blueprint, then choose your helper under **Notification group
-   helper**. Still select a group member under **Notification device**.
-
-Helper support requires Home Assistant **2026.5 or newer**, when Companion
-app notification entities became available. The helper must contain only
-Companion app notification entities (nested
-notification group helpers are also supported). The helper takes precedence
-over the notification group action and device. Home Assistant's standard
-`notify.send_message` action does not forward the button data, so the custom
-integration resolves each member to its mobile app notification action instead.
-If a member cannot be resolved, the request fails rather than sending an
-incomplete notification.
+For a single device, import the blueprint and select that device; the integration
+is not required. You can also use a YAML notification action group instead of a
+helper. Leave **Notification group helper** empty and enter an action such as
+`notify.family` under **Notification group**. Group members must support
+Companion app actionable notifications.
 
 ### YAML notification action groups
 

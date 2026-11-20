@@ -3,6 +3,7 @@
   "name": "Confirmable Actions",
   "version": "1.0.0",
   "documentation": "https://github.com/pajo30/HA-Confirmable-actions",
+  "issue_tracker": "https://github.com/pajo30/HA-Confirmable-actions/issues",
   "dependencies": ["group", "mobile_app"],
   "codeowners": []
 }
