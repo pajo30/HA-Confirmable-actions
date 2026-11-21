@@ -9,12 +9,15 @@ notifications to members of a Home Assistant notification group helper.
 Create and manage the group in the UI instead of maintaining a YAML notification
 group, and let the first person to respond decide for the whole group. 🏠
 
-- ✅ **Confirm, decline, or remind:** run your actions on **Yes**, stop on **No**,
-  or repeat the question after **Remind me later**.
+- ✅ **Confirm, choose an alternative, or remind:** run confirmation actions on
+  **Yes**, optional secondary actions on **No**, or optional reminder actions
+  before asking again after **Remind me later**.
 - 📱 **Include your household:** send to a notification group helper, including
   nested groups; responses and clearing apply to the whole request.
-- 🎨 **Make it yours:** use templated titles and messages, custom button labels,
-  and up to two extra buttons with their own action sequences.
+- 🎨 **Make it yours:** use templated titles and messages and custom labels for
+  the three Android-compatible buttons.
+- ▶️ **Call from another automation:** create a script from the script blueprint
+  and reuse the same confirmation flow without adding a trigger.
 
 **Example:** at bedtime, ask the household whether to turn off the living room
 lights. Anyone in the group can confirm, decline, or ask to be reminded. 🌙
@@ -45,8 +48,9 @@ Alternatively, copy `custom_components/confirmable_actions` from this
 repository to `<config>/custom_components/confirmable_actions`, restart, and
 add the integration through **Devices & services**.
 
-Setup registers `confirmable_actions.send_notification` and installs the
-blueprint automatically. No `configuration.yaml` edit is required.
+Setup registers `confirmable_actions.send_notification` and installs both the
+automation and script blueprints automatically. No `configuration.yaml` edit is
+required.
 
 ### 2️⃣ Create a confirmation automation
 
@@ -65,46 +69,110 @@ actions, preserving the buttons that Home Assistant's standard
 helpers are supported. If a member cannot be resolved, the request fails
 rather than sending an incomplete notification.
 
-The installed blueprint is never overwritten, including on integration updates.
-To update it, back up any edits, remove
+Installed blueprints are never overwritten, including on integration updates.
+To update them, back up any edits and remove the relevant file:
 `<config>/blueprints/automation/confirmable_actions/confirmable_notification.yaml`,
-then restart Home Assistant. The integration reinstalls its bundled version at
-the same path. Existing automations keep using that path; if any fail to load
-on restart, reload automations after the integration has started.
+or `<config>/blueprints/script/confirmable_actions/confirmable_notification.yaml`.
+Then restart Home Assistant. The integration reinstalls its bundled versions at
+the same paths. Existing automations and scripts keep using those paths; if any
+fail to load on restart, reload automations and scripts after the integration
+has started.
+
+### ▶️ Create a callable reminder script
+
+Under **Settings → Automations & scenes → Blueprints**, select **Confirmable
+notification with reminders (script)** and choose **Create script**. Configure
+the recipient, templated question, button actions, and reminder timing just as
+for the automation version; no trigger is needed.
+
+From another automation, use **Script: Turn on** to start the request without
+waiting for the recipient:
+
+```yaml
+- action: script.turn_on
+  target:
+    entity_id: script.confirm_turning_off_lights
+```
+
+Replace the entity ID with your script. Calling `script.confirm_turning_off_lights`
+directly instead waits until the request and its selected actions finish.
+The reminder button keeps the script running through the delay and resends.
 
 ## ⚙️ Configuration
 
 Set the reminder delay (default: 15 minutes) and the response timeout for each
-notification (default: 24 hours). ⏱️
+notification (default: 24 hours). Required input names end in `*`. ⏱️
 
-Optionally customize the **Accept button label**, **Deny button label**, and
+Reminders are optional. Turn off **Enable reminders** when you only want a
+confirmation and secondary button. This hides the reminder button and disables
+reminder responses, actions, delays, and resends. The toggle defaults to on to
+preserve existing configurations; reminder fields can keep their defaults when
+it is off.
+
+**Notification icon** provides an optional Material Design icon picker. Choose
+an icon such as `mdi:bell-ring`, `mdi:washing-machine`, or `mdi:cctv`; leave it
+blank to keep the default. The selected icon is sent on every reminder as well.
+Android uses it as the status bar icon. Supported iOS Companion app versions
+show it as a communication notification's sender icon, which requires a
+notification title. This does not change the phone's Home Assistant app icon.
+
+**Persistent notification (Android)** is optional and off by default. When
+enabled, the notification uses Android's `persistent` and `sticky` options:
+tapping it does not dismiss it, and the blueprint still clears it on a button
+response or timeout. This cannot enforce persistence on iOS. Android 14+ also
+allows some manual dismissal, so it is not a guarantee that a notification
+cannot be removed.
+
+**Notification tap destination** optionally opens a dashboard or page when the
+notification body is tapped, without adding another button. Use a relative path
+such as `/lovelace/cameras`, a dashboard view path such as
+`/dashboard-home/security`, or a full URL such as `https://example.com`.
+It is sent as Android's `clickAction` and iOS's `url`. Templates are supported
+and re-evaluated on every send. Leave it blank for the app's default behavior.
+Tapping the body does not run confirmation, secondary, or reminder actions and
+does not finish the pending request. Enable persistence on Android to keep the
+notification available after navigating.
+
+Optionally customize the **Accept button label**, **Secondary button label**, and
 **Reminder button label**. Their defaults are **Yes**, **No**, and
 **Remind me later**. Changing these labels only changes the displayed text,
-not the response behavior. Leave **Deny button label** or **Reminder button
+not the response behavior. Leave **Secondary button label** or **Reminder button
 label** blank to hide that button.
 
-Use **Extra button 1 label** and **Extra button 1 actions** (or button 2) to
-add a button that runs its own action sequence and finishes the request.
-Leave an extra button's label blank to disable it. Android supports at most
-three notification buttons: hide **No** and/or **Remind me later** when adding
-extra buttons to stay within that limit. iOS supports up to ten. 🤳
+Use **Actions on secondary button** to configure an optional alternative action
+sequence. It runs when that button is pressed, then finishes the request without
+running the confirmation actions. Rename its label to something appropriate,
+such as **Skip** or **Run a different routine**; **No** remains the default.
+The YAML input key is still `deny_label` for compatibility.
+
+Use **Actions on Remind me later** for optional actions that run immediately
+on every reminder press when reminders are enabled, after clearing the
+notification and before the delay.
+Leave either action list empty to keep the original behavior. Timeout does not
+run either list. A failure in a button's actions fails the request; a failure in
+reminder actions prevents the delay and resend.
+
+Extra buttons have been removed so notifications never exceed Android's
+three-button limit. When upgrading, remove any `extra_action_1_label`,
+`extra_action_1`, `extra_action_2_label`, and `extra_action_2` inputs from existing
+YAML automations. Move any still-needed alternative actions to
+`secondary_actions` and rename `deny_label`. Use `reminder_actions` for reminder
+side effects. 🤳
 
 The **Notification device** picker lists devices registered through the
 Companion app (`mobile_app` integration). Even when using a group, select a
 valid group member: Home Assistant validates device actions in unused branches.
-The helper takes precedence over a **Notification group** action, which in turn
-takes precedence over the device. Sending and clearing use the same destination.
+The helper takes precedence over the device. Sending and clearing use the same destination.
 The first response from any member applies to the entire request; the
 notification is then cleared on all members. A reminder resends to all members,
 not just the device that requested it. 🚦
 
 ### 🎯 Blueprint without the integration
 
-For a single device, import the blueprint and select that device; the integration
-is not required. You can also use a YAML notification action group instead of a
-helper. Leave **Notification group helper** empty and enter an action such as
-`notify.family` under **Notification group**. Group members must support
-Companion app actionable notifications.
+For a single device, import the blueprint, select that device, and leave
+**Notification group helper** empty; the integration is not required.
+For multiple recipients, install the integration and create a notification group
+helper in the UI. YAML notification action groups are no longer supported.
 
 To import it, open **Settings → Automations & scenes → Blueprints → Import
 Blueprint** and paste:
@@ -117,23 +185,18 @@ Alternatively, copy `blueprints/automation/confirmable_notification.yaml` to
 `<config>/blueprints/automation/confirmable_actions/confirmable_notification.yaml`
 and reload automations.
 
-### 📨 YAML notification action groups
+For the script version, import:
 
-For example, configure a notification group in Home Assistant's
-`configuration.yaml` (merge this with any existing `notify` configuration),
-then restart Home Assistant:
-
-```yaml
-notify:
-  - platform: group
-    name: family
-    services:
-      - action: mobile_app_phone_one
-      - action: mobile_app_phone_two
+```text
+https://github.com/pajo30/HA-Confirmable-actions/blob/main/blueprints/script/confirmable_notification.yaml
 ```
 
-Use the suffixes of your actual `notify.mobile_app_*` actions for the members.
-In the blueprint, set **Notification group** to `notify.family`.
+Or copy `blueprints/script/confirmable_notification.yaml` to
+`<config>/blueprints/script/confirmable_actions/confirmable_notification.yaml`
+and reload scripts. Neither version needs the integration when sending to a
+single device.
+
+### 📨 Templated messages
 
 **Notification title** and **Notification message** accept Home Assistant
 templates, including `if`/`else` conditions and state lookups. They are evaluated
@@ -152,6 +215,11 @@ If upgrading from the notification-action text field, edit each existing
 automation and select its **Notification device** again. For YAML automations,
 replace `notification_service` with `notification_device`, using the device's
 registry ID rather than a `notify.mobile_app_*` action or display name.
+
+If upgrading from a YAML notification group, create a group helper containing
+the Companion app notification entities, remove `notification_group` from the
+blueprint inputs, and select the new **Notification group helper** instead.
+Keep selecting one group member under **Notification device** for validation.
 
 For example, ask whether to turn off a light every evening: 💡
 
@@ -186,12 +254,13 @@ entity with your own.
 
 ## 🧠 Behavior and limitations
 
-- ✅ **Yes** runs the confirmation actions; each enabled extra button runs only
-  its own actions. **No** or an unanswered notification
-  reaching its timeout ends the request without running them. Swiping away a
-  notification is not an answer; the request remains pending until timeout.
-- 🔁 After **Remind me later**, the notification is cleared and resent after the
-  delay. Each resend starts a fresh response timeout.
+- ✅ **Yes** runs the confirmation actions; the secondary button runs only its
+  optional actions and ends the request. Timeout ends the request without
+  running any button actions. Swiping away a notification is not an answer;
+  the request remains pending until timeout.
+- 🔁 After **Remind me later**, the notification is cleared, optional reminder
+  actions run, and the notification is resent after the delay. Each resend
+  starts a fresh response timeout and re-evaluates the title and message templates.
 - 🧹 Notifications are cleared on a response or timeout on a best-effort basis.
   Clearing can depend on platform restrictions and whether the app was used
   recently; a failed clear does not prevent the confirmed actions from running.
@@ -199,8 +268,9 @@ entity with your own.
   unique per request and resend, so a response to an older notification cannot
   confirm a different request or a subsequent reminder.
 - 🛑 Pending waits and reminder delays do **not** survive a Home Assistant restart
-  or automation reload. Disabling or cancelling the automation also stops its
-  pending requests; notifications may remain on the device.
+  or an automation/script reload. Disabling or cancelling the automation, or
+  stopping the script, also stops its pending requests; notifications may remain
+  on the device.
 - 🔐 The device must be able to communicate its response to Home Assistant.
   This blueprint is a convenience confirmation, not an authorization mechanism
   for safety-critical actions.
@@ -226,6 +296,8 @@ python -m unittest discover -s tests -q
 The `josepy` constraint keeps the older Home Assistant runtime compatible with
 its ACME dependency.
 
-The blueprint is also bundled under
+The blueprints are also bundled under
 `custom_components/confirmable_actions/blueprints/` for integration installs.
-Keep both copies identical when making changes.
+The automation copy is `confirmable_notification.yaml`; the script copy is
+`script/confirmable_notification.yaml`. Keep each bundled copy identical to its
+counterpart under `blueprints/automation/` or `blueprints/script/`.

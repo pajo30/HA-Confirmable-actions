@@ -26,25 +26,34 @@ BUNDLED_BLUEPRINT = (
 
 class BlueprintInstallTests(unittest.TestCase):
     def test_bundled_blueprint_matches_importable_blueprint(self):
-        self.assertEqual(
-            BUNDLED_BLUEPRINT.read_bytes(),
-            (ROOT / "blueprints/automation/confirmable_notification.yaml").read_bytes(),
-        )
+        for domain in ("automation", "script"):
+            with self.subTest(domain=domain):
+                bundled = BUNDLED_BLUEPRINT if domain == "automation" else (
+                    BUNDLED_BLUEPRINT.parent / domain / BUNDLED_BLUEPRINT.name
+                )
+                self.assertEqual(
+                    bundled.read_bytes(),
+                    (ROOT / "blueprints" / domain / BUNDLED_BLUEPRINT.name).read_bytes(),
+                )
 
     def test_install_preserves_existing_blueprint(self):
-        with tempfile.TemporaryDirectory() as config_dir:
-            path = (
-                Path(config_dir)
-                / "blueprints/automation/confirmable_actions/confirmable_notification.yaml"
-            )
-            self.assertTrue(_install_blueprint(config_dir))
-            self.assertEqual(path.read_bytes(), BUNDLED_BLUEPRINT.read_bytes())
-            path.write_text("custom blueprint", encoding="utf-8")
-            self.assertFalse(_install_blueprint(config_dir))
-            self.assertEqual(path.read_text(encoding="utf-8"), "custom blueprint")
-            path.unlink()
-            self.assertTrue(_install_blueprint(config_dir))
-            self.assertEqual(path.read_bytes(), BUNDLED_BLUEPRINT.read_bytes())
+        for domain in ("automation", "script"):
+            with self.subTest(domain=domain), tempfile.TemporaryDirectory() as config_dir:
+                bundled = BUNDLED_BLUEPRINT if domain == "automation" else (
+                    BUNDLED_BLUEPRINT.parent / domain / BUNDLED_BLUEPRINT.name
+                )
+                path = (
+                    Path(config_dir)
+                    / "blueprints" / domain / "confirmable_actions/confirmable_notification.yaml"
+                )
+                self.assertTrue(_install_blueprint(config_dir, domain))
+                self.assertEqual(path.read_bytes(), bundled.read_bytes())
+                path.write_text("custom blueprint", encoding="utf-8")
+                self.assertFalse(_install_blueprint(config_dir, domain))
+                self.assertEqual(path.read_text(encoding="utf-8"), "custom blueprint")
+                path.unlink()
+                self.assertTrue(_install_blueprint(config_dir, domain))
+                self.assertEqual(path.read_bytes(), bundled.read_bytes())
 
 
 class IntegrationSetupTests(unittest.IsolatedAsyncioTestCase):
@@ -59,14 +68,17 @@ class IntegrationSetupTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_ui_setup_installs_blueprint_and_unload_removes_action(self):
         cache = Mock(async_reset_cache=AsyncMock())
-        self.hass.data["blueprint"] = {"automation": cache}
+        script_cache = Mock(async_reset_cache=AsyncMock())
+        self.hass.data["blueprint"] = {"automation": cache, "script": script_cache}
         self.assertTrue(await async_setup_entry(self.hass, Mock()))
         cache.async_reset_cache.assert_awaited_once()
+        script_cache.async_reset_cache.assert_awaited_once()
         self.assertTrue(self.hass.services.has_service(DOMAIN, "send_notification"))
         self.assertTrue(await async_unload_entry(self.hass, Mock()))
         self.assertFalse(self.hass.services.has_service(DOMAIN, "send_notification"))
         self.assertTrue(await async_setup_entry(self.hass, Mock()))
         cache.async_reset_cache.assert_awaited_once()
+        script_cache.async_reset_cache.assert_awaited_once()
         self.assertTrue(self.hass.services.has_service(DOMAIN, "send_notification"))
 
 

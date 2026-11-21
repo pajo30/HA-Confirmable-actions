@@ -28,12 +28,17 @@ SEND_SCHEMA = vol.Schema(
 )
 
 
-def _install_blueprint(config_dir: str) -> bool:
+def _install_blueprint(config_dir: str, domain: str = "automation") -> bool:
     """Install the bundled blueprint without replacing an existing file."""
-    source = Path(__file__).parent / "blueprints" / BLUEPRINT_NAME
+    source_dir = Path(__file__).parent / "blueprints"
+    source = (
+        source_dir / BLUEPRINT_NAME
+        if domain == "automation"
+        else source_dir / domain / BLUEPRINT_NAME
+    )
     content = source.read_bytes()
     destination = (
-        Path(config_dir) / "blueprints" / "automation" / DOMAIN / BLUEPRINT_NAME
+        Path(config_dir) / "blueprints" / domain / DOMAIN / BLUEPRINT_NAME
     )
     destination.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -50,14 +55,15 @@ def _install_blueprint(config_dir: str) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Install the blueprint and register the group notification action."""
-    installed = await hass.async_add_executor_job(
-        _install_blueprint, hass.config.config_dir
-    )
-    if installed:
-        blueprints = hass.data.get("blueprint", {}).get("automation")
-        if blueprints is not None:
-            await blueprints.async_reset_cache()
+    """Install the blueprints and register the group notification action."""
+    for domain in ("automation", "script"):
+        installed = await hass.async_add_executor_job(
+            _install_blueprint, hass.config.config_dir, domain
+        )
+        if installed:
+            blueprints = hass.data.get("blueprint", {}).get(domain)
+            if blueprints is not None:
+                await blueprints.async_reset_cache()
 
     async def send_notification(call: ServiceCall) -> None:
         registry = er.async_get(hass)
