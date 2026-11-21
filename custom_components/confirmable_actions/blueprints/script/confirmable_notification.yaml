@@ -1,0 +1,257 @@
+blueprint:
+  name: Confirmable notification with reminders (script)
+  description: >-
+    Call this script from another automation to send a templated Companion app
+    notification to a device or notification group, with up to three buttons:
+    confirmation, secondary, and reminder. Run the chosen button's actions,
+    finish on the secondary button or timeout, or resend after the reminder
+    delay. Required fields are marked with *. Titles and messages support
+    templates evaluated on every send.
+  domain: script
+  homeassistant:
+    min_version: "2024.10.0"
+  input:
+    notification_device:
+      name: Notification device *
+      description: >-
+        Select the Companion app device that should receive the notification.
+        The device must be registered with Home Assistant and able to receive
+        push notifications. With a notification group, select a group member
+        here for device-action validation; delivery uses only the group.
+      selector:
+        device:
+          filter:
+            - integration: mobile_app
+          multiple: false
+    notification_group_helper:
+      name: Notification group helper
+      description: >-
+        Optional notification group helper. Requires the Confirmable Actions
+        custom integration. All members must be Companion app notify entities.
+        Takes precedence over Notification device for sending and clearing.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: notify
+              integration: group
+    notification_title:
+      name: Notification title
+      description: Supports templates, evaluated on every send.
+      default: Confirmation requested
+      selector:
+        text: {}
+    notification_message:
+      name: Notification message *
+      description: >-
+        The question the recipient should answer. Supports templates, including
+        conditional messages, evaluated again on every reminder.
+      selector:
+        text:
+          multiline: true
+    notification_icon:
+      name: Notification icon
+      description: >-
+        Optional Material Design icon, such as mdi:bell-ring. Leave blank for
+        the app's default icon. Android uses it in the status bar; supported
+        iOS app versions use it as a sender icon and require a notification title.
+      default: ""
+      selector:
+        icon: {}
+    notification_persistent:
+      name: Persistent notification (Android)
+      description: >-
+        Keep the notification visible after tapping it, until a button response
+        or timeout clears it. Android 14+ may still allow manual dismissal.
+        Not supported on iOS.
+      default: false
+      selector:
+        boolean: {}
+    notification_tap_url:
+      name: Notification tap destination
+      description: >-
+        Optional dashboard path (for example /lovelace/cameras) or full URL to
+        open when tapping the notification itself, on Android or iOS. Leave blank
+        for the app's default behavior. Supports templates evaluated on every send.
+        Tapping does not run button actions or finish the request.
+      default: ""
+      selector:
+        text: {}
+    accept_label:
+      name: Accept button label
+      description: Text for the button that runs the confirmation actions.
+      default: "Yes"
+      selector:
+        text: {}
+    deny_label:
+      name: Secondary button label
+      description: >-
+        Text for the secondary button, which runs its optional actions and finishes.
+        Leave blank to hide this button.
+      default: "No"
+      selector:
+        text: {}
+    enable_reminders:
+      name: Enable reminders
+      description: >-
+        Turn off to hide the reminder button and disable reminder actions,
+        delays, and resends for this notification.
+      default: true
+      selector:
+        boolean: {}
+    reminder_label:
+      name: Reminder button label
+      description: >-
+        Text for the button that requests another notification later.
+        Only shown when reminders are enabled. Leave blank to hide this button.
+      default: Remind me later
+      selector:
+        text: {}
+    confirmation_actions:
+      name: Actions on Yes *
+      description: These actions run only when the recipient answers Yes.
+      selector:
+        action: {}
+    secondary_actions:
+      name: Actions on secondary button
+      description: >-
+        Optional actions run when the secondary button is pressed, then the
+        request finishes. Not run on timeout.
+      default: []
+      selector:
+        action: {}
+    reminder_actions:
+      name: Actions on Remind me later
+      description: >-
+        Optional actions run immediately on every reminder press, before the
+        reminder delay and resend. Not run on timeout.
+      default: []
+      selector:
+        action: {}
+    reminder_delay:
+      name: Reminder delay
+      description: How long to wait after Remind me later before sending again.
+      default:
+        minutes: 15
+      selector:
+        duration: {}
+    response_timeout:
+      name: Response timeout
+      description: >-
+        How long to wait for a response to each notification. On timeout,
+        stop without running the confirmation actions.
+      default:
+        hours: 24
+      selector:
+        duration: {}
+
+mode: parallel
+max: 10
+
+sequence:
+  - variables:
+      notification_tag: >-
+        {{ 'confirmable_' ~ context.id ~ '_' ~ now().strftime('%Y%m%d%H%M%S%f') }}
+      notification_group_helper: !input notification_group_helper
+      notification_icon: !input notification_icon
+      notification_persistent: !input notification_persistent
+      accept_label: !input accept_label
+      deny_label: !input deny_label
+      enable_reminders: !input enable_reminders
+      reminder_label: !input reminder_label
+  - repeat:
+      while: "{{ true }}"
+      sequence:
+        - variables:
+            yes_action: "{{ 'YES_' ~ notification_tag ~ '_' ~ repeat.index }}"
+            no_action: "{{ 'NO_' ~ notification_tag ~ '_' ~ repeat.index }}"
+            remind_action: "{{ 'REMIND_' ~ notification_tag ~ '_' ~ repeat.index }}"
+            notification_tap_url: !input notification_tap_url
+        - variables:
+            notification_data: >-
+              {% set buttons = namespace(items=[
+                {'action': yes_action, 'title': accept_label}]) %}
+              {% for action, title in [
+                (no_action, deny_label),
+                (remind_action, reminder_label if enable_reminders else '')] %}
+                {% if title %}
+                  {% set buttons.items = buttons.items +
+                    [{'action': action, 'title': title}] %}
+                {% endif %}
+              {% endfor %}
+              {% set payload = {'tag': notification_tag, 'actions': buttons.items} %}
+              {% if notification_icon | trim %}
+                {% set payload = dict(payload, notification_icon=notification_icon | trim) %}
+              {% endif %}
+              {% if notification_persistent %}
+                {% set payload = dict(payload, persistent=true, sticky=true) %}
+              {% endif %}
+              {% if notification_tap_url | trim %}
+                {% set payload = dict(payload, url=notification_tap_url | trim,
+                                      clickAction=notification_tap_url | trim) %}
+              {% endif %}
+              {{ payload }}
+        - if: "{{ notification_group_helper != '' }}"
+          then:
+            - action: confirmable_actions.send_notification
+              data:
+                entity_id: !input notification_group_helper
+                title: !input notification_title
+                message: !input notification_message
+                data: "{{ notification_data }}"
+          else:
+            - device_id: !input notification_device
+              domain: mobile_app
+              type: notify
+              title: !input notification_title
+              message: !input notification_message
+              data: "{{ notification_data }}"
+        - wait_for_trigger:
+            - trigger: event
+              id: "yes"
+              event_type: mobile_app_notification_action
+              event_data:
+                action: "{{ yes_action }}"
+            - trigger: event
+              id: "no"
+              event_type: mobile_app_notification_action
+              event_data:
+                action: "{{ no_action }}"
+            - trigger: event
+              id: "remind"
+              enabled: !input enable_reminders
+              event_type: mobile_app_notification_action
+              event_data:
+                action: "{{ remind_action }}"
+          timeout: !input response_timeout
+          continue_on_timeout: true
+        - if: "{{ notification_group_helper != '' }}"
+          then:
+            - action: confirmable_actions.send_notification
+              continue_on_error: true
+              data:
+                entity_id: !input notification_group_helper
+                message: clear_notification
+                data:
+                  tag: "{{ notification_tag }}"
+          else:
+            - device_id: !input notification_device
+              domain: mobile_app
+              type: notify
+              continue_on_error: true
+              message: clear_notification
+              data:
+                tag: "{{ notification_tag }}"
+        - if: "{{ wait.trigger is not none and wait.trigger.id == 'remind' }}"
+          then:
+            - sequence: !input reminder_actions
+            - delay: !input reminder_delay
+          else:
+            - choose:
+                - conditions: >-
+                    {{ wait.trigger is not none and wait.trigger.id == 'yes' }}
+                  sequence: !input confirmation_actions
+                - conditions: >-
+                    {{ wait.trigger is not none and wait.trigger.id == 'no' }}
+                  sequence: !input secondary_actions
+            - stop: Request finished.

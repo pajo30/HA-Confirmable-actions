@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Confirmable Actions",
-        "description": "Set up Confirmable Actions and install its automation blueprint."
+        "description": "Set up Confirmable Actions and install its automation and script blueprints."
       }
     },
     "abort": {

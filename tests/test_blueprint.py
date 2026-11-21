@@ -10,9 +10,11 @@ from homeassistant.components.automation.config import (
     AUTOMATION_BLUEPRINT_SCHEMA,
     PLATFORM_SCHEMA,
 )
+from homeassistant.components.blueprint import BLUEPRINT_SCHEMA
 from homeassistant.components.blueprint.models import Blueprint, BlueprintInputs
 from homeassistant.components.mobile_app import device_action
 from homeassistant.components.mobile_app.const import DATA_DEVICES, DATA_NOTIFY
+from homeassistant.components.script.config import SCRIPT_ENTITY_SCHEMA
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
@@ -31,6 +33,8 @@ BLUEPRINT_PATH = (
 
 
 class BlueprintTests(unittest.IsolatedAsyncioTestCase):
+    blueprint_domain = "automation"
+
     async def asyncSetUp(self):
         self.config_dir = tempfile.TemporaryDirectory()
         self.hass = HomeAssistant(self.config_dir.name)
@@ -50,8 +54,12 @@ class BlueprintTests(unittest.IsolatedAsyncioTestCase):
         async def selected(call):
             self.selected.append(call.data["button"])
 
-        self.hass.services.async_register("notify", "family", notify)
+        async def set_state(call):
+            self.hass.states.async_set(call.data["entity_id"], call.data["state"])
+
+        self.hass.services.async_register("confirmable_actions", "send_notification", notify)
         self.hass.services.async_register("test", "selected", selected)
+        self.hass.services.async_register("test", "set_state", set_state)
 
     async def asyncTearDown(self):
         for script in self.scripts:
@@ -59,13 +67,18 @@ class BlueprintTests(unittest.IsolatedAsyncioTestCase):
         await self.hass.async_stop()
         self.config_dir.cleanup()
 
-    async def start_request(self, **overrides):
+    async def start_request(self, context=None, **overrides):
+        domain = self.blueprint_domain
+        path = BLUEPRINT_PATH.parents[1] / domain / BLUEPRINT_PATH.name
         blueprint = Blueprint(
-            load_yaml(str(BLUEPRINT_PATH)), schema=AUTOMATION_BLUEPRINT_SCHEMA
+            load_yaml(str(path)),
+            expected_domain=domain,
+            schema=(
+                AUTOMATION_BLUEPRINT_SCHEMA if domain == "automation" else BLUEPRINT_SCHEMA
+            ),
         )
         inputs = {
-            "notification_trigger": [{"trigger": "event", "event_type": "test"}],
-            "notification_group": "notify.family",
+            "notification_group_helper": "notify.family",
             "notification_device": "a" * 32,
             "notification_message": "Confirm?",
             "confirmation_actions": [
@@ -75,12 +88,15 @@ class BlueprintTests(unittest.IsolatedAsyncioTestCase):
             "response_timeout": {"seconds": 5},
             **overrides,
         }
+        if domain == "automation":
+            inputs["notification_trigger"] = [{"trigger": "event", "event_type": "test"}]
         configured = BlueprintInputs(
             blueprint,
-            {"use_blueprint": {"path": str(BLUEPRINT_PATH), "input": inputs}},
+            {"use_blueprint": {"path": str(path), "input": inputs}},
         )
         configured.validate()
-        config = PLATFORM_SCHEMA(configured.async_substitute())
+        schema = PLATFORM_SCHEMA if domain == "automation" else SCRIPT_ENTITY_SCHEMA
+        config = schema(configured.async_substitute())
         with (
             patch.object(dr.async_get(self.hass), "async_get", return_value=Mock()),
             patch(
@@ -88,10 +104,19 @@ class BlueprintTests(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value=device_action),
             ),
         ):
-            sequence = await async_validate_actions_config(self.hass, config["actions"])
-        script = Script(self.hass, sequence, "Confirm", "automation")
+            sequence = await async_validate_actions_config(
+                self.hass, config["actions" if domain == "automation" else "sequence"]
+            )
+        script = Script(
+            self.hass,
+            sequence,
+            "Confirm",
+            domain,
+            script_mode=config["mode"],
+            max_runs=config["max"],
+        )
         self.scripts.append(script)
-        return asyncio.create_task(script.async_run(context=Context()))
+        return asyncio.create_task(script.async_run(context=context or Context()))
 
     async def wait_for_message(self, count):
         async with asyncio.timeout(5):
@@ -110,33 +135,169 @@ class BlueprintTests(unittest.IsolatedAsyncioTestCase):
         )
         await asyncio.sleep(0.01)
 
-    async def test_group_custom_buttons_and_hidden_defaults(self):
-        for button in (1, 2):
-            with self.subTest(button=button):
+    async def test_secondary_button_runs_only_its_actions_and_finishes(self):
+        task = await self.start_request(
+            accept_label="Confirm",
+            deny_label="Do something else",
+            secondary_actions=[
+                {"action": "test.selected", "data": {"button": "secondary"}}
+            ],
+            reminder_actions=[
+                {"action": "test.selected", "data": {"button": "remind"}}
+            ],
+        )
+        message = await self.wait_for_message(1)
+        buttons = message["data"]["actions"]
+        self.assertEqual(
+            [b["title"] for b in buttons], ["Confirm", "Do something else", "Remind me later"]
+        )
+        await self.respond(buttons[1]["action"], "phone_two")
+        await asyncio.wait_for(task, 5)
+        self.assertEqual(self.selected, ["secondary"])
+        self.assertEqual(self.notifications[-1]["message"], "clear_notification")
+        self.assertEqual(self.notifications[-1]["data"]["tag"], message["data"]["tag"])
+        self.assertEqual(len(self.notifications), 2)
+
+    async def test_default_notification_has_no_persistence_or_tap_override(self):
+        task = await self.start_request()
+        message = await self.wait_for_message(1)
+        self.assertEqual(set(message["data"]), {"tag", "actions"})
+        await self.respond(message["data"]["actions"][1]["action"])
+        await asyncio.wait_for(task, 5)
+
+    async def test_persistence_and_tap_destination_survive_reminders(self):
+        self.hass.states.async_set("sensor.notification_page", "/lovelace/first")
+        task = await self.start_request(
+            notification_icon="mdi:bell-ring",
+            notification_persistent=True,
+            notification_tap_url=" {{ states('sensor.notification_page') }} ",
+        )
+        first = await self.wait_for_message(1)
+        self.assertEqual(first["data"]["notification_icon"], "mdi:bell-ring")
+        self.assertIs(first["data"]["persistent"], True)
+        self.assertIs(first["data"]["sticky"], True)
+        self.assertEqual(first["data"]["url"], "/lovelace/first")
+        self.assertEqual(first["data"]["clickAction"], "/lovelace/first")
+        self.assertEqual(len(first["data"]["actions"]), 3)
+        self.hass.states.async_set("sensor.notification_page", "/lovelace/second")
+        await self.respond(first["data"]["actions"][2]["action"])
+        second = await self.wait_for_message(2)
+        self.assertEqual(second["data"]["notification_icon"], "mdi:bell-ring")
+        self.assertIs(second["data"]["persistent"], True)
+        self.assertIs(second["data"]["sticky"], True)
+        self.assertEqual(second["data"]["url"], "/lovelace/second")
+        self.assertEqual(second["data"]["clickAction"], "/lovelace/second")
+        self.assertEqual(first["data"]["tag"], second["data"]["tag"])
+        await self.respond(second["data"]["actions"][0]["action"])
+        await asyncio.wait_for(task, 5)
+        self.assertEqual(self.selected, ["yes"])
+        for notification in self.notifications:
+            if notification["message"] == "clear_notification":
+                self.assertEqual(notification["data"], {"tag": first["data"]["tag"]})
+
+    async def test_whitespace_tap_destination_keeps_default_behavior(self):
+        task = await self.start_request(notification_tap_url="   ")
+        message = await self.wait_for_message(1)
+        self.assertNotIn("url", message["data"])
+        self.assertNotIn("clickAction", message["data"])
+        await self.respond(message["data"]["actions"][1]["action"])
+        await asyncio.wait_for(task, 5)
+
+    async def test_hidden_buttons_do_not_run_their_actions_on_confirmation(self):
+        task = await self.start_request(
+            deny_label="",
+            reminder_label="",
+            secondary_actions=[
+                {"action": "test.selected", "data": {"button": "secondary"}}
+            ],
+            reminder_actions=[
+                {"action": "test.selected", "data": {"button": "remind"}}
+            ],
+        )
+        message = await self.wait_for_message(1)
+        self.assertEqual([b["title"] for b in message["data"]["actions"]], ["Yes"])
+        await self.respond(message["data"]["actions"][0]["action"])
+        await asyncio.wait_for(task, 5)
+        self.assertEqual(self.selected, ["yes"])
+
+    async def test_disabled_reminders_ignore_responses_and_do_not_resend(self):
+        task = await self.start_request(
+            enable_reminders=False,
+            reminder_actions=[
+                {"action": "test.selected", "data": {"button": "remind"}}
+            ],
+        )
+        message = await self.wait_for_message(1)
+        self.assertEqual(
+            [b["title"] for b in message["data"]["actions"]], ["Yes", "No"]
+        )
+        await self.respond(f"REMIND_{message['data']['tag']}_1")
+        self.assertEqual(self.selected, [])
+        self.assertEqual(len(self.notifications), 1)
+        self.assertFalse(task.done())
+        await self.respond(message["data"]["actions"][0]["action"])
+        await asyncio.wait_for(task, 5)
+        self.assertEqual(self.selected, ["yes"])
+        self.assertEqual(len(self.notifications), 2)
+
+    async def test_reminder_actions_run_on_every_press_before_delay_and_resend(self):
+        self.hass.states.async_set("light.test", "on")
+        task = await self.start_request(
+            notification_message="{{ states('light.test') }}",
+            reminder_delay={"milliseconds": 100},
+            reminder_actions=[
+                {"action": "test.selected", "data": {"button": "remind"}},
+                {"action": "test.set_state", "data": {"entity_id": "light.test", "state": "off"}},
+            ],
+        )
+        first = await self.wait_for_message(1)
+        self.assertEqual(first["message"], "on")
+        await self.respond(first["data"]["actions"][2]["action"])
+        self.assertEqual(self.selected, ["remind"])
+        self.assertEqual(len(self.notifications), 2)
+        self.assertFalse(task.done())
+        second = await self.wait_for_message(2)
+        self.assertEqual(second["message"], "off")
+        await self.respond(first["data"]["actions"][2]["action"])
+        self.assertEqual(self.selected, ["remind"])
+        await self.respond(second["data"]["actions"][2]["action"])
+        self.assertEqual(self.selected, ["remind", "remind"])
+        third = await self.wait_for_message(3)
+        await self.respond(third["data"]["actions"][0]["action"])
+        await asyncio.wait_for(task, 5)
+        self.assertEqual(self.selected, ["remind", "remind", "yes"])
+
+    async def test_parallel_runs_with_shared_context_are_isolated(self):
+        context = Context()
+        task = await self.start_request(context=context)
+        first = await self.wait_for_message(1)
+        other_task = asyncio.create_task(self.scripts[-1].async_run(context=context))
+        other = await self.wait_for_message(2)
+        self.assertNotEqual(first["data"]["tag"], other["data"]["tag"])
+        await self.respond(first["data"]["actions"][0]["action"])
+        await asyncio.wait_for(task, 5)
+        self.assertFalse(other_task.done())
+        await self.respond(other["data"]["actions"][1]["action"])
+        await asyncio.wait_for(other_task, 5)
+        self.assertEqual(self.selected, ["yes"])
+
+    async def test_secondary_and_reminder_action_failures_stop_request(self):
+        async def fail(call):
+            raise HomeAssistantError("Button action failed")
+
+        self.hass.services.async_register("test", "fail", fail)
+        for input_name, button_index in (("secondary_actions", 1), ("reminder_actions", 2)):
+            with self.subTest(input_name=input_name):
                 self.notifications.clear()
                 self.selected.clear()
-                task = await self.start_request(
-                    deny_label="",
-                    reminder_label="",
-                    extra_action_1_label="First",
-                    extra_action_2_label="Second",
-                    extra_action_1=[
-                        {"action": "test.selected", "data": {"button": "first"}}
-                    ],
-                    extra_action_2=[
-                        {"action": "test.selected", "data": {"button": "second"}}
-                    ],
-                )
+                task = await self.start_request(**{input_name: [{"action": "test.fail"}]})
                 message = await self.wait_for_message(1)
-                buttons = message["data"]["actions"]
-                self.assertEqual([b["title"] for b in buttons], ["Yes", "First", "Second"])
-                await self.respond(buttons[button]["action"], "phone_two")
-                await asyncio.wait_for(task, 5)
-                self.assertEqual(self.selected, ["first" if button == 1 else "second"])
+                await self.respond(message["data"]["actions"][button_index]["action"])
+                with self.assertRaisesRegex(HomeAssistantError, "Button action failed"):
+                    await asyncio.wait_for(task, 5)
+                self.assertEqual(self.selected, [])
+                self.assertEqual(len(self.notifications), 2)
                 self.assertEqual(self.notifications[-1]["message"], "clear_notification")
-                self.assertEqual(
-                    self.notifications[-1]["data"]["tag"], message["data"]["tag"]
-                )
 
     async def test_reminder_templates_and_response_isolation(self):
         self.hass.states.async_set("light.test", "on")
@@ -194,9 +355,18 @@ class BlueprintTests(unittest.IsolatedAsyncioTestCase):
             ),
         ):
             task = await self.start_request(
-                notification_group="", notification_device="a" * 32
+                notification_group_helper="",
+                notification_device="a" * 32,
+                notification_icon="mdi:cctv",
+                notification_persistent=True,
+                notification_tap_url="/lovelace/cameras",
             )
             message = await self.wait_for_message(1)
+            self.assertEqual(message["data"]["notification_icon"], "mdi:cctv")
+            self.assertIs(message["data"]["persistent"], True)
+            self.assertIs(message["data"]["sticky"], True)
+            self.assertEqual(message["data"]["url"], "/lovelace/cameras")
+            self.assertEqual(message["data"]["clickAction"], "/lovelace/cameras")
             await self.respond(message["data"]["actions"][0]["action"])
             await asyncio.wait_for(task, 5)
             self.assertEqual(self.selected, ["yes"])
@@ -204,7 +374,15 @@ class BlueprintTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.notifications[-1]["message"], "clear_notification")
 
     async def test_timeout_clears_without_actions(self):
-        task = await self.start_request(response_timeout={"milliseconds": 50})
+        task = await self.start_request(
+            response_timeout={"milliseconds": 50},
+            secondary_actions=[
+                {"action": "test.selected", "data": {"button": "secondary"}}
+            ],
+            reminder_actions=[
+                {"action": "test.selected", "data": {"button": "remind"}}
+            ],
+        )
         await asyncio.wait_for(task, 5)
         self.assertEqual(self.selected, [])
         self.assertEqual(self.notifications[-1]["message"], "clear_notification")
@@ -240,8 +418,19 @@ class BlueprintTests(unittest.IsolatedAsyncioTestCase):
         }
         with patch("custom_components.confirmable_actions.er.async_get") as registry:
             registry.return_value.async_get.side_effect = entries.get
-            task = await self.start_request(notification_group_helper="notify.family")
+            task = await self.start_request(
+                notification_group_helper="notify.family",
+                notification_icon="mdi:home",
+                notification_persistent=True,
+                notification_tap_url="https://example.com",
+            )
             message = await self.wait_for_message(2)
+            for notification in self.notifications:
+                self.assertEqual(notification["data"]["notification_icon"], "mdi:home")
+                self.assertIs(notification["data"]["persistent"], True)
+                self.assertIs(notification["data"]["sticky"], True)
+                self.assertEqual(notification["data"]["url"], "https://example.com")
+                self.assertEqual(notification["data"]["clickAction"], "https://example.com")
             self.assertEqual(
                 {n["target"] for n in self.notifications}, {"webhook_one", "webhook_two"}
             )
@@ -341,6 +530,10 @@ class BlueprintTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(len(self.notifications), 1)
         self.assertEqual(self.notifications[0]["target"], "two")
+
+
+class ScriptBlueprintTests(BlueprintTests):
+    blueprint_domain = "script"
 
 
 if __name__ == "__main__":
